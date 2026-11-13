@@ -15,6 +15,10 @@ Project root / name: **Recursa**.
 2. Point `RECURSA_EXTERNAL_JUDGE` at real jb/lab judge CLIs when checkouts exist
 3. Keep tests green every tick
 
+## Last verify
+
+`cargo test --workspace` + `recursa score --skip-run` green (Δ +100 pp). Remaining Next items need local GH workflow scope / dataset checkouts.
+
 ## Verify
 
 ```powershell
