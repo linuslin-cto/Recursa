@@ -267,6 +267,18 @@ fn write_stub_rubric(dir: &Path, task_id: &str) -> Result<(), String> {
         dir.join("rubrics.json"),
         serde_json::to_string_pretty(&rubric).unwrap() + "\n",
     )
+    .map_err(|e| e.to_string())?;
+    // JobBench-shaped twin for loader parity tests / upstream tooling.
+    let jb = serde_json::json!({
+        "rubrics": [
+            {"id": "refined_ok_prefix", "criterion": "OK:", "weight": 1.0, "must_contain": "OK:"},
+            {"id": "mentions_task", "criterion": task_id, "weight": 1.0, "must_contain": task_id},
+        ]
+    });
+    fs::write(
+        dir.join("RUBRICS.json"),
+        serde_json::to_string_pretty(&jb).unwrap() + "\n",
+    )
     .map_err(|e| e.to_string())
 }
 

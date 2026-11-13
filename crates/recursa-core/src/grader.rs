@@ -115,17 +115,90 @@ impl Rubric {
     }
 }
 
-/// Grades `answer.txt` (or `answer.md`) against `rubrics.json` in the run dir.
+/// Parse Recursa `rubrics.json` or JobBench-style `RUBRICS.json`.
+///
+/// Supported shapes:
+/// - `{"criteria":[{"id","must_contain"}, ...]}`
+/// - `{"rubrics":[{"criterion": str|list, "weight": number, "must_contain"?: str}, ...]}`
+pub fn load_rubric_json(text: &str) -> Result<Rubric, String> {
+    let v: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    if let Ok(r) = serde_json::from_value::<Rubric>(v.clone()) {
+        if !r.criteria.is_empty() {
+            return Ok(r);
+        }
+    }
+    let Some(arr) = v.get("rubrics").and_then(|x| x.as_array()) else {
+        return Err("unrecognized rubric JSON (need criteria[] or rubrics[])".into());
+    };
+    let mut criteria = Vec::new();
+    for (i, item) in arr.iter().enumerate() {
+        let id = item
+            .get("id")
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("c{i}"));
+        if let Some(mc) = item.get("must_contain").and_then(|x| x.as_str()) {
+            if !mc.is_empty() {
+                criteria.push(RubricCriterion {
+                    id,
+                    must_contain: mc.into(),
+                });
+                continue;
+            }
+        }
+        if let Some(kws) = item.get("keywords").and_then(|x| x.as_array()) {
+            for (j, kw) in kws.iter().enumerate() {
+                if let Some(s) = kw.as_str() {
+                    if !s.is_empty() {
+                        criteria.push(RubricCriterion {
+                            id: format!("{id}.{j}"),
+                            must_contain: s.into(),
+                        });
+                    }
+                }
+            }
+            continue;
+        }
+        // Fallback: treat criterion text as a required substring when short enough.
+        let crit = item.get("criterion");
+        let texts: Vec<String> = match crit {
+            Some(Value::String(s)) => vec![s.clone()],
+            Some(Value::Array(a)) => a
+                .iter()
+                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                .collect(),
+            _ => Vec::new(),
+        };
+        for (j, t) in texts.into_iter().enumerate() {
+            let needle = t.trim();
+            if !needle.is_empty() && needle.len() <= 64 {
+                criteria.push(RubricCriterion {
+                    id: format!("{id}.{j}"),
+                    must_contain: needle.into(),
+                });
+            }
+        }
+    }
+    if criteria.is_empty() {
+        return Err("rubrics[] produced no must_contain criteria".into());
+    }
+    Ok(Rubric { criteria })
+}
+
+/// Grades `answer.txt` (or `answer.md`) against `rubrics.json` / `RUBRICS.json`.
 pub struct RubricFileGrader;
 
 impl Grader for RubricFileGrader {
     fn grade(&self, run_dir: &Path) -> Result<Grade, String> {
-        let rubric_path = run_dir.join("rubrics.json");
+        let rubric_path = [
+            run_dir.join("rubrics.json"),
+            run_dir.join("RUBRICS.json"),
+        ]
+        .into_iter()
+        .find(|p| p.is_file())
+        .ok_or_else(|| "missing rubrics.json / RUBRICS.json".to_string())?;
         let text = std::fs::read_to_string(&rubric_path).map_err(|e| e.to_string())?;
-        let rubric: Rubric = serde_json::from_str(&text).map_err(|e| e.to_string())?;
-        if rubric.criteria.is_empty() {
-            return Err("rubrics.json has no criteria".into());
-        }
+        let rubric = load_rubric_json(&text)?;
         let answer = std::fs::read_to_string(run_dir.join("answer.txt"))
             .or_else(|_| std::fs::read_to_string(run_dir.join("answer.md")))
             .map_err(|e| e.to_string())?;
@@ -179,5 +252,21 @@ mod tests {
         let g = RubricFileGrader.grade(dir.path()).unwrap();
         assert_eq!(g.n_passed, 1);
         assert!(!g.all_pass);
+    }
+
+    #[test]
+    fn load_jobbench_style_rubrics() {
+        let jb = r#"{
+          "rubrics": [
+            {"criterion": "OK:", "weight": 1.0},
+            {"criterion": ["contracts/task-1"], "weight": 1.0, "id": "task"}
+          ]
+        }"#;
+        let r = load_rubric_json(jb).unwrap();
+        assert_eq!(r.criteria.len(), 2);
+        let g = r.grade_text("OK: contracts/task-1\n");
+        assert!(g.all_pass);
+        let g = r.grade_text("BASE: contracts/task-1\n");
+        assert_eq!(g.n_passed, 1);
     }
 }
