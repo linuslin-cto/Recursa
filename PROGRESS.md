@@ -17,7 +17,7 @@ Project root / name: **Recursa**.
 
 ## Last verify
 
-`cargo test --workspace` + `recursa score --skip-run` green (Δ +100 pp).
+`cargo test --workspace` + `recursa score --skip-run` green (Δ +100 pp) — 2026-11-14.
 GH token scopes still `gist,read:org,repo` (no `workflow`); CI install remains blocked offline.
 
 ## Verify
