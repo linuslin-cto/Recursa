@@ -7,14 +7,15 @@ Project root / name: **Recursa**.
 - Core recursion + evaluation + catalog run/judge + parallel propose
 - Rubric graders + JobBench-style `RUBRICS.json` loader
 - OpenCode shim fork-hardening
-- GitHub Actions CI (`cargo test` + `recursa score`)
+- JobBench-style `RUBRICS.json` loader; CI template at `docs/ci.yml.example`
 - Published: https://github.com/linuslin-cto/Recursa
 
 ## Next
 
-1. Wire weighted JobBench judge subprocess when dataset checkout is present
-2. LAB criteria-aware partial credit from real task.json (still stripped from improver view)
-3. Keep tests green every tick
+1. Enable GitHub Actions (needs `workflow` OAuth scope) from `docs/ci.yml.example`
+2. Wire weighted JobBench judge subprocess when dataset checkout is present
+3. LAB criteria-aware partial credit from real task.json
+4. Keep tests green every tick
 
 ## Verify
 
