@@ -17,7 +17,8 @@ Project root / name: **Recursa**.
 
 ## Last verify
 
-`cargo test --workspace` + `recursa score --skip-run` green (Δ +100 pp). Remaining Next items need local GH workflow scope / dataset checkouts.
+`cargo test --workspace` + `recursa score --skip-run` green (Δ +100 pp).
+GH token scopes still `gist,read:org,repo` (no `workflow`); CI install remains blocked offline.
 
 ## Verify
 
