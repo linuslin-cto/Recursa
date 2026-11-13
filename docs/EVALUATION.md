@@ -49,6 +49,10 @@ Expected offline result on the ledger demo:
 
 (`self_evolution` asserts the same numbers.)
 
+Catalog stubs use **weighted** rubrics (e.g. OK: weight 2, task-id weight 1).
+Optional: set `RECURSA_EXTERNAL_JUDGE` to a program that writes `scores.json`
+into the run directory (see `ExternalJudgeGrader`).
+
 ## Paper reference gains (model-backed benches)
 
 Published orientation figures (not reproduced by the offline demo):

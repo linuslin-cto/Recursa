@@ -3,7 +3,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Grade {
@@ -288,6 +289,59 @@ impl Grader for RubricFileGrader {
     }
 }
 
+/// Spawn an external judge that writes `scores.json` under `run_dir`.
+///
+/// Env: `RECURSA_EXTERNAL_JUDGE` = program; optional `RECURSA_EXTERNAL_JUDGE_ARGS`
+/// (space-separated) inserted before the run directory argument.
+pub struct ExternalJudgeGrader {
+    pub program: PathBuf,
+    pub args: Vec<String>,
+}
+
+impl ExternalJudgeGrader {
+    pub fn from_env() -> Option<Self> {
+        let program = std::env::var_os("RECURSA_EXTERNAL_JUDGE")?;
+        if program.is_empty() {
+            return None;
+        }
+        let args = std::env::var("RECURSA_EXTERNAL_JUDGE_ARGS")
+            .unwrap_or_default()
+            .split_whitespace()
+            .map(|s| s.to_string())
+            .collect();
+        Some(Self {
+            program: PathBuf::from(program),
+            args,
+        })
+    }
+}
+
+impl Grader for ExternalJudgeGrader {
+    fn grade(&self, run_dir: &Path) -> Result<Grade, String> {
+        let mut cmd = Command::new(&self.program);
+        cmd.args(&self.args).arg(run_dir);
+        let output = cmd
+            .output()
+            .map_err(|e| format!("external judge spawn {}: {e}", self.program.display()))?;
+        if !output.status.success() {
+            return Err(format!(
+                "external judge exited {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        ScoresFileGrader.grade(run_dir)
+    }
+}
+
+/// Prefer `RECURSA_EXTERNAL_JUDGE` when set; otherwise rubric files.
+pub fn grade_run_dir(run_dir: &Path) -> Result<Grade, String> {
+    if let Some(ext) = ExternalJudgeGrader::from_env() {
+        return ext.grade(run_dir);
+    }
+    RubricFileGrader.grade(run_dir)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -362,5 +416,33 @@ mod tests {
         let stripped = strip_lab_task_for_improver(raw);
         assert!(!stripped.contains("criteria"));
         assert!(stripped.contains("\"id\""));
+    }
+
+    #[test]
+    fn external_judge_reads_scores_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let run = dir.path().join("run");
+        std::fs::create_dir_all(&run).unwrap();
+        std::fs::write(
+            run.join("scores.json"),
+            r#"{"n_passed":3,"n_criteria":4,"all_pass":false}"#,
+        )
+        .unwrap();
+        #[cfg(windows)]
+        let prog = {
+            let bat = dir.path().join("noop.bat");
+            std::fs::write(&bat, "@echo off\r\nexit /b 0\r\n").unwrap();
+            bat
+        };
+        #[cfg(not(windows))]
+        let prog = PathBuf::from("true");
+        let g = ExternalJudgeGrader {
+            program: prog,
+            args: vec![],
+        }
+        .grade(&run)
+        .unwrap();
+        assert_eq!(g.n_passed, 3);
+        assert_eq!(g.n_criteria, 4);
     }
 }

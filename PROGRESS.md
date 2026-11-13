@@ -5,14 +5,14 @@ Project root / name: **Recursa**.
 ## Done
 
 - Core recursion + evaluation + catalog run/judge + parallel propose
-- Weighted rubrics + JobBench `RUBRICS.json` + LAB `task.json` criteria (stripped from improver)
-- OpenCode shim fork-hardening; CI template at `docs/ci.yml.example`
+- Weighted rubrics + LAB criteria stripping + external judge env hook
+- OpenCode shim fork-hardening; CI template + `docs/ACTIONS.md`
 - Published: https://github.com/linuslin-cto/Recursa
 
 ## Next
 
-1. Enable GitHub Actions (needs `workflow` OAuth scope) from `docs/ci.yml.example`
-2. Optional external judge subprocess wrapper (`RECURSA_EXTERNAL_JUDGE`)
+1. `gh auth refresh -s workflow` then install `.github/workflows/ci.yml` from example
+2. Point `RECURSA_EXTERNAL_JUDGE` at real jb/lab judge CLIs when checkouts exist
 3. Keep tests green every tick
 
 ## Verify

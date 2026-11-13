@@ -3,7 +3,7 @@
 use crate::benchmarks::{BenchmarkId, BenchmarkStub};
 use crate::datasets::{self, TaskIndex};
 use crate::grader::{
-    rubric_from_lab_task_json, strip_lab_task_for_improver, Grader, Rubric, RubricFileGrader,
+    grade_run_dir, rubric_from_lab_task_json, strip_lab_task_for_improver, Rubric,
 };
 use crate::proposer::{Proposer, ProposerError, Reply};
 use crate::spec::{BenchSpec, BenchmarkAdapter, SpecError};
@@ -246,12 +246,12 @@ impl BenchmarkAdapter for CatalogAdapter {
     }
 
     fn score(&self, run_dir: &Path) -> Option<HashMap<String, serde_json::Value>> {
-        let g = RubricFileGrader.grade(run_dir).ok()?;
+        let g = grade_run_dir(run_dir).ok()?;
         let mut m = HashMap::new();
         m.insert("n_passed".into(), serde_json::json!(g.n_passed));
         m.insert("n_criteria".into(), serde_json::json!(g.n_criteria));
         m.insert("all_pass".into(), serde_json::json!(g.all_pass));
-        m.insert("metric".into(), serde_json::json!("rubric"));
+        m.insert("metric".into(), serde_json::json!("rubric_or_external"));
         for (k, v) in g.detail {
             m.insert(k, v);
         }
