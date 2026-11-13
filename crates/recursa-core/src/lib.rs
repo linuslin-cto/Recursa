@@ -4,6 +4,7 @@
 //! experience library, and scheduling for recursive agent harnessing.
 
 pub mod benchmarks;
+pub mod catalog;
 pub mod config;
 pub mod context;
 pub mod datasets;

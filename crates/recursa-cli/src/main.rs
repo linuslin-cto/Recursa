@@ -50,6 +50,21 @@ enum Commands {
         #[arg(long, default_value_t = false)]
         skip_run: bool,
     },
+    /// Run schedule over a catalog dataset (jb|lab|wb dry stub).
+    Run {
+        #[arg(long)]
+        bench: String,
+        #[arg(long, default_value = "datasets")]
+        dataset: PathBuf,
+        #[arg(long, default_value = "runs/catalog")]
+        output: PathBuf,
+        #[arg(long, default_value_t = 1)]
+        k: usize,
+        #[arg(long, default_value_t = 0)]
+        max_tasks: usize,
+        #[arg(long)]
+        seed: Option<u64>,
+    },
 }
 
 fn grade_demo_selection(task_id: &str, run_dir: &Path) -> Result<JudgeRow, String> {
@@ -313,6 +328,83 @@ fn main() -> Result<()> {
                 }
             }
             score_demo(&output, k)?;
+        }
+        Commands::Run {
+            bench,
+            dataset,
+            output,
+            k,
+            max_tasks,
+            seed,
+        } => {
+            if k == 0 {
+                bail!("--k must be >= 1");
+            }
+            let id = recursa_core::benchmarks::BenchmarkId::from_token(&bench)
+                .ok_or_else(|| anyhow::anyhow!("unknown bench {bench}; expected jb|lab|wb"))?;
+            let stub = match id {
+                recursa_core::benchmarks::BenchmarkId::JobBench => {
+                    recursa_core::benchmarks::BenchmarkStub::jobbench()
+                }
+                recursa_core::benchmarks::BenchmarkId::Lab => {
+                    recursa_core::benchmarks::BenchmarkStub::lab()
+                }
+                recursa_core::benchmarks::BenchmarkId::WorkBuddy => {
+                    recursa_core::benchmarks::BenchmarkStub::workbuddy()
+                }
+                recursa_core::benchmarks::BenchmarkId::Demo => {
+                    bail!("demo uses recursa demo, not run")
+                }
+            };
+            let data_root = recursa_core::datasets::dataset_root(&dataset, stub.id.as_str());
+            std::fs::create_dir_all(&output)?;
+            let adapter = recursa_core::catalog::CatalogAdapter::open(&output, &data_root, stub)
+                .map_err(|e| anyhow::anyhow!(e))?;
+            let mut proposer = recursa_core::catalog::CatalogProposer::new();
+            let by = adapter.tasks_by_domain();
+            let stream = schedule::stream_order(&by, seed.or(Some(1)), &[])
+                .map_err(|e| anyhow::anyhow!(e))?;
+            let mut done = 0usize;
+            let mut failed = 0usize;
+            let mut rows = Vec::new();
+            let limit = if max_tasks == 0 {
+                stream.len()
+            } else {
+                max_tasks
+            };
+            for (domain, task_id) in stream.into_iter().take(limit) {
+                let row = schedule::run_task(
+                    &adapter,
+                    &mut proposer,
+                    &task_id,
+                    k,
+                    &adapter.spec.runs_root,
+                    &output.join("library").join(k.to_string()),
+                );
+                let status = row
+                    .get("status")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("failed")
+                    .to_string();
+                if status == "ok" || status == "skipped" {
+                    done += 1;
+                } else {
+                    failed += 1;
+                }
+                rows.push(json!({"domain": domain, "task_id": task_id, "status": status}));
+            }
+            let result = json!({"done": done, "failed": failed, "tasks": rows});
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            if failed > 0 {
+                bail!("catalog run finished with {failed} failed task(s); done={done}");
+            }
+            eprintln!(
+                "run ok: bench={} done={done} k={k} executions={}",
+                adapter.spec.name,
+                adapter
+                    .execution_count
+                    .load(std::sync::atomic::Ordering::SeqCst)
+            );
         }
     }
     Ok(())
