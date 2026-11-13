@@ -286,6 +286,12 @@ impl Default for DemoProposer {
 }
 
 impl Proposer for DemoProposer {
+    fn fork(&self) -> Option<Box<dyn Proposer>> {
+        Some(Box::new(DemoProposer {
+            calls: Arc::clone(&self.calls),
+        }))
+    }
+
     fn call(
         &mut self,
         _mission: &str,

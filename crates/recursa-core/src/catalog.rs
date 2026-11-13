@@ -247,6 +247,10 @@ impl Default for CatalogProposer {
 }
 
 impl Proposer for CatalogProposer {
+    fn fork(&self) -> Option<Box<dyn Proposer>> {
+        Some(Box::new(CatalogProposer))
+    }
+
     fn call(
         &mut self,
         _mission: &str,

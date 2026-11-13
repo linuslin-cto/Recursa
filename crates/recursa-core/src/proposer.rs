@@ -57,6 +57,12 @@ pub trait Proposer: Send + Sync {
         context_dir: Option<&Path>,
         label: &str,
     ) -> Result<Reply, ProposerError>;
+
+    /// Independent session for parallel Propose stages (`PHASE_WIDTH`).
+    /// Return `None` to force sequential proposes.
+    fn fork(&self) -> Option<Box<dyn Proposer>> {
+        None
+    }
 }
 
 /// How a channel-backed proposer obtains a session transcript.

@@ -142,6 +142,67 @@ fn accept_tree(
     (kept, String::new())
 }
 
+/// Run Propose stages; fork+rayon when every stage can get an independent proposer.
+fn run_stage_batch(
+    specs: &[(String, String, String)],
+    fallback: &Tree,
+    adapter: &dyn BenchmarkAdapter,
+    prop: &mut dyn Proposer,
+    ctx_dir: &Path,
+    task_id: &str,
+    rollouts: &[RunView],
+    harness_dir: Option<&Path>,
+    library_dir: Option<&Path>,
+    pool: &[(String, PathBuf, Option<RunView>)],
+    decisions: &HashMap<String, String>,
+) -> Vec<Stage> {
+    let forks: Vec<Option<Box<dyn Proposer>>> =
+        (0..specs.len()).map(|_| prop.fork()).collect();
+    if !forks.is_empty() && forks.iter().all(|f| f.is_some()) {
+        use rayon::prelude::*;
+        return specs
+            .par_iter()
+            .zip(forks)
+            .map(|((label, dim, job), mut local)| {
+                run_stage(
+                    label,
+                    dim,
+                    job,
+                    fallback,
+                    adapter,
+                    local.as_mut().unwrap().as_mut(),
+                    ctx_dir,
+                    task_id,
+                    rollouts,
+                    harness_dir,
+                    library_dir,
+                    pool,
+                    decisions,
+                )
+            })
+            .collect();
+    }
+    let mut out = Vec::with_capacity(specs.len());
+    for (label, dim, job) in specs {
+        out.push(run_stage(
+            label,
+            dim,
+            job,
+            fallback,
+            adapter,
+            prop,
+            ctx_dir,
+            task_id,
+            rollouts,
+            harness_dir,
+            library_dir,
+            pool,
+            decisions,
+        ));
+    }
+    out
+}
+
 pub fn run_stage(
     label: &str,
     dim: &str,
@@ -447,25 +508,28 @@ pub fn run_parallel(
             specs.push((format!("{}{i}", d.to_lowercase()), d.to_string(), i));
         }
     }
-    let mut stages = Vec::new();
-    for (label, dim, index) in &specs {
-        let stage = run_stage(
-            label,
-            dim,
-            &propose_job(dim, k, *index),
-            base_tree,
-            adapter,
-            prop,
-            &ctx_dir,
-            task_id,
-            base,
-            Some(&base_dir),
-            library_dir,
-            &[],
-            &HashMap::new(),
-        );
-        stages.push(stage);
-    }
+    let stages = run_stage_batch(
+        &specs
+            .iter()
+            .map(|(label, dim, index)| {
+                (
+                    label.clone(),
+                    dim.clone(),
+                    propose_job(dim, k, *index),
+                )
+            })
+            .collect::<Vec<_>>(),
+        base_tree,
+        adapter,
+        prop,
+        &ctx_dir,
+        task_id,
+        base,
+        Some(&base_dir),
+        library_dir,
+        &[],
+        &HashMap::new(),
+    );
     record_sessions(&mut ledger, &stages);
     for stage in &stages {
         result.trees.insert(stage.label.clone(), stage.tree.clone());
@@ -509,26 +573,22 @@ pub fn run_parallel(
         })
         .collect();
 
-    let mut aggs = Vec::new();
-    for i in 1..=k {
-        let lbl = format!("agg{i}");
-        let stage = run_stage(
-            &lbl,
-            "AGG",
-            &aggregate_job(k, i),
-            base_tree,
-            adapter,
-            prop,
-            &ctx_dir,
-            task_id,
-            base,
-            Some(&base_dir),
-            library_dir,
-            &pool_ev,
-            &decisions,
-        );
-        aggs.push(stage);
-    }
+    let agg_specs: Vec<_> = (1..=k)
+        .map(|i| (format!("agg{i}"), "AGG".to_string(), aggregate_job(k, i)))
+        .collect();
+    let aggs = run_stage_batch(
+        &agg_specs,
+        base_tree,
+        adapter,
+        prop,
+        &ctx_dir,
+        task_id,
+        base,
+        Some(&base_dir),
+        library_dir,
+        &pool_ev,
+        &decisions,
+    );
     record_sessions(&mut ledger, &aggs);
     for stage in &aggs {
         result.trees.insert(stage.label.clone(), stage.tree.clone());
