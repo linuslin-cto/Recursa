@@ -1,53 +1,72 @@
-# Evaluation: verifying self-evolution
+# Evaluation: verifying and scoring self-evolution
 
-Recursa’s eval scheme follows the recursive-harnessing experiment design:
-refine → judge (optional) → report, with a **base vs refined** comparison and a
-**harnessing-level library** that carries lessons across tasks in a domain.
+Recursa follows the recursive-harnessing experiment loop:
 
-## What “self-evolution” means here
+**refine → judge → report**, with a **base vs refined** comparison and a
+**harnessing-level library** across tasks in a domain.
+
+## What “self-evolution” means
 
 | Level | Mechanism | Offline check |
 |---|---|---|
 | Task-level | Propose–Probe–Compose on one task | Refined deliverable beats base on the same inputs |
-| Harnessing-level | Domain library `R` after adoption + reflection | Later task contexts include earlier harnesses / experience |
+| Harnessing-level | Domain library `R` after adoption | Later task contexts include earlier harnesses |
+| Score | Judge chosen runs; summarise by (mode, k) | Refined score − base score = Δ pp > 0 |
 
 Model weights stay fixed; only the editable harness tree evolves.
 
-## Online protocol (benchmarks)
+## Scoring rules (aligned with upstream report)
 
-Mirrored from the upstream experiment guide, using Recursa env names:
+- Grade = `n_passed / n_criteria` (partial credit). Ungraded rows are **excluded**
+  from the denominator (never treated as zero).
+- LAB-style reports may show both **partial %** and **all-criteria pass %**.
+- Pick provenance: final / candidate / base.
+- At **k=1**, parallel and sequential are the same procedure; any gap is a
+  **noise floor**, not a mode result.
+- Baseline: score `base*` reference executions separately (`--bases` role) so
+  gains come from harness edits.
+
+## Offline protocol (this repo)
+
+```powershell
+cargo test -p recursa-core --test self_evolution
+cargo run -p recursa-cli -- score --output runs/demo --k 1
+```
+
+`recursa score` re-runs the demo, grades signed totals, writes
+`runs/.../judged.json`, and prints:
+
+- refined summary (score %)
+- **Base vs refined** Δ in percentage points
+- paper reference gains (orientation only)
+
+Expected offline result on the ledger demo:
+
+| Cell | Base | Refined | Δ |
+|---|---|---|---|
+| parallel k=1 | 0% | 100% | **+100 pp** |
+| sequential k=1 | 0% | 100% | **+100 pp** |
+
+(`self_evolution` asserts the same numbers.)
+
+## Paper reference gains (model-backed benches)
+
+Published orientation figures (not reproduced by the offline demo):
+
+| Benchmark | Max reported gain |
+|---|---|
+| WorkBuddy-Bench | +11.5 pp |
+| JobBench | +4.5 pp |
+| LAB partial pass | +11.8 pp |
+
+## Online protocol (when model channels are wired)
 
 ```powershell
 $env:RECURSA_RUNS_DIR = "runs/lab-seq-k1"
 cargo run -p recursa-cli -- catalog --bench lab --output datasets
-# Model-backed refine / judge / report (when wired):
-# recursa --bench lab --k 1 --mode sequential --only-domains antitrust-competition --max-tasks 1
-# recursa-judge --bench lab --k 1 --mode sequential   # include --bases for base_judged.json
-# recursa-report --bench lab --k 1 --mode sequential
+# refine / judge / report with identical bench, substrate, k, mode, seed
 ```
 
-Keep **benchmark, substrate, k, mode, seed** identical across refine / judge / report.
-Use a fresh `RECURSA_RUNS_DIR` when changing models or task selection.
-Domain-stratified splits: `select_split` + `stream_order` (seeded shuffle).
-
-Baseline: score reference (`base*`) rollouts separately from the adopted refined
-harness so gains are attributable to harness edits, not task noise.
-
-## Offline protocol (this repo)
-
-No API keys. The deterministic demo uses a **positive-only** ledger sum as the
-base harness; the scripted improver removes the filter so **signed** totals match.
-
-```powershell
-cargo test -p recursa-core --test self_evolution
-cargo run -p recursa-cli -- demo --output runs/demo --k 1
-```
-
-`self_evolution` asserts:
-
-1. Base execution on `ledger-1` emits the positive-only total (wrong for signed).
-2. After recursion + selection, the adopted refined harness emits the signed total.
-3. Domain library contains `ledger-1` before / for `ledger-2` (cross-task transfer).
-4. `ledger-2` also lands on the signed total (stream continues to improve).
-
-Budget identity remains `R = 4k` rollouts and `P = 3k` improvement stages per mode.
+Keep identity fixed across refine / judge / report. Use a fresh
+`RECURSA_RUNS_DIR` when changing models or task selection.
+Budget identity: `R = 4k` rollouts, `P = 3k` improvement stages per mode.

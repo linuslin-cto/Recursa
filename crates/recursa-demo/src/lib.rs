@@ -25,6 +25,15 @@ total = sum((amount for amount in amounts if amount > 0), Decimal(0))
 print(f'Total: {total:.2f}')
 "#;
 
+/// Signed-total ground truth for the deterministic demo tasks.
+pub fn expected_signed_total(task_id: &str) -> Option<&'static str> {
+    match task_id {
+        "ledger-1" => Some("Total: 85.15\n"),
+        "ledger-2" => Some("Total: 20.25\n"),
+        _ => None,
+    }
+}
+
 /// Interpret the demo summarize script without requiring a Python runtime.
 fn run_summarize_logic(script: &str, ledger_csv: &str) -> Result<String, String> {
     let positive_only = script.contains("if amount > 0");
@@ -235,7 +244,22 @@ impl BenchmarkAdapter for DemoAdapter {
         if let Some(f) = hook.as_ref() {
             return f(run_dir);
         }
-        None
+        drop(hook);
+        // Infer task_id from executions/.../<task>/<label>/
+        let task_id = run_dir
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        let expected = expected_signed_total(task_id)?;
+        let got = fs::read_to_string(run_dir.join("answer.txt")).ok()?;
+        let pass = got.trim() == expected.trim();
+        let mut m = HashMap::new();
+        m.insert("n_passed".into(), serde_json::json!(u64::from(pass)));
+        m.insert("n_criteria".into(), serde_json::json!(1));
+        m.insert("all_pass".into(), serde_json::json!(pass));
+        m.insert("metric".into(), serde_json::json!("signed_total"));
+        Some(m)
     }
 }
 

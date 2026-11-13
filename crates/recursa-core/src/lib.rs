@@ -14,6 +14,7 @@ pub mod library;
 pub mod opencode_protocol;
 pub mod proposer;
 pub mod recursion;
+pub mod report;
 pub mod runmark;
 pub mod schedule;
 pub mod selection;

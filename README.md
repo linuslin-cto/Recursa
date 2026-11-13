@@ -32,11 +32,15 @@ No model credentials are required for the demo.
 
 ## Evaluation (self-evolution)
 
-See [docs/EVALUATION.md](docs/EVALUATION.md). The demo + `self_evolution` test check
-both recursion levels offline: base harness fails signed totals; refined harness
-passes; task-2 sees task-1 in the domain library.
+See [docs/EVALUATION.md](docs/EVALUATION.md).
 
-Offline identity: `R=4k` rollouts, `P=3k` improvement stages per mode.
+```powershell
+cargo test -p recursa-core --test self_evolution
+cargo run -p recursa-cli -- score --output runs/demo --k 1
+```
+
+Offline: base fails signed totals (0%), refined passes (100%), Δ **+100 pp**;
+task-2 sees task-1 in the domain library. Budget identity: `R=4k`, `P=3k`.
 
 ## Model channel
 
