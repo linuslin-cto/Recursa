@@ -1,7 +1,7 @@
 //! Recursa core library — recursive agent harnessing for an open world.
 //!
-//! Mirrors the Python `harness2.core` package: tree surface, ledger budgets,
-//! Propose–Probe–Compose recursion, selection, library, and scheduling.
+//! Tree surface, ledger budgets, Propose–Probe–Compose recursion, selection,
+//! experience library, and scheduling for recursive agent harnessing.
 
 pub mod benchmarks;
 pub mod config;

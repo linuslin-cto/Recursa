@@ -44,7 +44,7 @@ pub fn inputs_fingerprint(prompt: &str, files: Option<&Path>) -> String {
     hex(&hasher.finalize())[..16].to_string()
 }
 
-const MARKER: &str = ".harness2_complete";
+const MARKER: &str = ".recursa_complete";
 
 pub fn mark_complete(run_dir: &Path, run_id: &str, inputs: &str) {
     let _ = fs::create_dir_all(run_dir);

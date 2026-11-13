@@ -179,7 +179,7 @@ impl ChannelProposer {
     pub fn new(spec: ChannelSpec) -> Result<Self, ProposerError> {
         if spec.model.trim().is_empty() {
             return Err(ProposerError::new(
-                "proposer model is empty; set HARNESS2_IMPROVER_MODEL",
+                "proposer model is empty; set RECURSA_IMPROVER_MODEL",
                 0,
                 0.0,
             ));
@@ -194,7 +194,7 @@ impl ChannelProposer {
     pub fn with_transport(spec: ChannelSpec, transport: Box<dyn SessionTransport>) -> Result<Self, ProposerError> {
         if spec.model.trim().is_empty() {
             return Err(ProposerError::new(
-                "proposer model is empty; set HARNESS2_IMPROVER_MODEL",
+                "proposer model is empty; set RECURSA_IMPROVER_MODEL",
                 0,
                 0.0,
             ));

@@ -1,6 +1,7 @@
 /target/
 /datasets/
 /runs/
+# Local upstream checkout (not part of this repo)
 /harness2/
 **/*.rs.bk
 .idea/

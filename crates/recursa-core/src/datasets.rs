@@ -1,4 +1,4 @@
-//! On-disk task dataset discovery (Python `harness2.benchmarks.tasks` parity).
+//! On-disk task dataset discovery for jb / lab / wb layouts.
 //!
 //! Layouts (relative to a benchmark root):
 //! - jb:  `*/*/task_folder/TASK_INSTRUCTIONS.txt` → id=`domain/task`, domain=`domain`

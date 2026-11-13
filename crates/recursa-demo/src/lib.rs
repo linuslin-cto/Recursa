@@ -1,7 +1,7 @@
 //! Deterministic local adapter for exercising the real adaptation workflow.
 //!
-//! Mirrors Python `harness2.demo`: a buggy positive-only ledger sum as the base
-//! harness, and a scripted proposer that drops the filter so signed totals match.
+//! Deterministic local demo: buggy positive-only ledger sum as the base harness,
+//! plus a scripted proposer that drops the filter so signed totals match.
 
 use recursa_core::proposer::{Proposer, ProposerError, Reply};
 use recursa_core::spec::{

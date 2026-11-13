@@ -32,14 +32,15 @@ Spawns an external program (bun + opencode CLI, or a shim). Expected flags:
 
 - Prints JSONL events on stdout (`text`, `step_finish`, `error`, …).
 - Optional answer file: `<context>/output/answer.md`.
-- Env (convention, matching upstream):
-  - `HARNESS2_IMPROVER_MODEL` / `HARNESS2_SOLVER_MODEL`
-  - `BUN`, `OPENCODE_DIR` when using the real OpenCode package
+- Env (convention):
+  - `RECURSA_IMPROVER_MODEL` / `RECURSA_SOLVER_MODEL`
+  - `RECURSA_RUNS_DIR` for experiment output roots
+  - `BUN`, `OPENCODE_DIR` / `OPENCODE_BIN` when using a live OpenCode package
 
 Example:
 
 ```powershell
-$env:HARNESS2_IMPROVER_MODEL = "provider/model-id"
+$env:RECURSA_IMPROVER_MODEL = "provider/model-id"
 # Shim (fixture without OPENCODE_DIR; live when OPENCODE_DIR + bun are set):
 # CommandTransport { program: pwsh, args: ["-File", "scripts/opencode-session.ps1"] }
 ```

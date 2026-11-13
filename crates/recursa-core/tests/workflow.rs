@@ -1,5 +1,4 @@
 //! Focused regressions for execution, evidence, and adoption contracts.
-//! Ported from Python `tests/test_workflow.py`.
 
 use recursa_core::context;
 use recursa_core::judge;
