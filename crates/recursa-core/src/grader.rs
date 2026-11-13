@@ -67,11 +67,17 @@ impl Grader for LedgerTotalGrader {
     }
 }
 
+fn default_weight() -> u64 {
+    1
+}
+
 /// One rubric criterion: deliverable must contain a substring (case-sensitive).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RubricCriterion {
     pub id: String,
     pub must_contain: String,
+    #[serde(default = "default_weight")]
+    pub weight: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,10 +92,12 @@ impl Rubric {
                 RubricCriterion {
                     id: "refined_ok_prefix".into(),
                     must_contain: "OK:".into(),
+                    weight: 2,
                 },
                 RubricCriterion {
                     id: "mentions_task".into(),
                     must_contain: task_id.into(),
+                    weight: 1,
                 },
             ],
         }
@@ -98,21 +106,87 @@ impl Rubric {
     pub fn grade_text(&self, text: &str) -> Grade {
         let mut detail = HashMap::new();
         let mut n_passed = 0u64;
+        let mut n_criteria = 0u64;
+        let mut all_pass = true;
         for c in &self.criteria {
+            let w = c.weight.max(1);
+            n_criteria += w;
             let pass = text.contains(&c.must_contain);
             if pass {
-                n_passed += 1;
+                n_passed += w;
+            } else {
+                all_pass = false;
             }
-            detail.insert(c.id.clone(), Value::Bool(pass));
+            detail.insert(
+                c.id.clone(),
+                serde_json::json!({"pass": pass, "weight": w}),
+            );
         }
-        let n_criteria = self.criteria.len() as u64;
+        if n_criteria == 0 {
+            all_pass = false;
+        }
         Grade {
             n_passed,
             n_criteria,
-            all_pass: n_criteria > 0 && n_passed == n_criteria,
+            all_pass: all_pass && n_criteria > 0 && n_passed == n_criteria,
             detail,
         }
     }
+}
+
+/// Load LAB-style `criteria` from task.json (never shown to the improver).
+pub fn rubric_from_lab_task_json(text: &str) -> Result<Rubric, String> {
+    let v: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    let Some(arr) = v.get("criteria").and_then(|x| x.as_array()) else {
+        return Err("task.json missing criteria[]".into());
+    };
+    let mut criteria = Vec::new();
+    for (i, item) in arr.iter().enumerate() {
+        let id = item
+            .get("id")
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("lab{i}"));
+        let weight = item
+            .get("weight")
+            .and_then(|x| x.as_u64().or_else(|| x.as_f64().map(|f| f.round() as u64)))
+            .unwrap_or(1)
+            .max(1);
+        let must = item
+            .get("must_contain")
+            .or_else(|| item.get("keyword"))
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string())
+            .or_else(|| {
+                item.get("description")
+                    .and_then(|x| x.as_str())
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty() && s.len() <= 64)
+            })
+            .ok_or_else(|| format!("criteria[{i}] needs must_contain/keyword"))?;
+        criteria.push(RubricCriterion {
+            id,
+            must_contain: must,
+            weight,
+        });
+    }
+    if criteria.is_empty() {
+        return Err("criteria[] empty".into());
+    }
+    Ok(Rubric { criteria })
+}
+
+/// Strip grading fields before exposing task.json to improvers.
+pub fn strip_lab_task_for_improver(text: &str) -> String {
+    let Ok(mut v) = serde_json::from_str::<Value>(text) else {
+        return text.to_string();
+    };
+    if let Some(obj) = v.as_object_mut() {
+        obj.remove("criteria");
+        obj.remove("rubrics");
+        obj.remove("reference_answer");
+    }
+    serde_json::to_string_pretty(&v).unwrap_or_else(|_| text.to_string())
 }
 
 /// Parse Recursa `rubrics.json` or JobBench-style `RUBRICS.json`.
@@ -137,11 +211,17 @@ pub fn load_rubric_json(text: &str) -> Result<Rubric, String> {
             .and_then(|x| x.as_str())
             .map(|s| s.to_string())
             .unwrap_or_else(|| format!("c{i}"));
+        let weight = item
+            .get("weight")
+            .and_then(|x| x.as_u64().or_else(|| x.as_f64().map(|f| f.round() as u64)))
+            .unwrap_or(1)
+            .max(1);
         if let Some(mc) = item.get("must_contain").and_then(|x| x.as_str()) {
             if !mc.is_empty() {
                 criteria.push(RubricCriterion {
                     id,
                     must_contain: mc.into(),
+                    weight,
                 });
                 continue;
             }
@@ -153,6 +233,7 @@ pub fn load_rubric_json(text: &str) -> Result<Rubric, String> {
                         criteria.push(RubricCriterion {
                             id: format!("{id}.{j}"),
                             must_contain: s.into(),
+                            weight,
                         });
                     }
                 }
@@ -175,6 +256,7 @@ pub fn load_rubric_json(text: &str) -> Result<Rubric, String> {
                 criteria.push(RubricCriterion {
                     id: format!("{id}.{j}"),
                     must_contain: needle.into(),
+                    weight,
                 });
             }
         }
@@ -245,12 +327,13 @@ mod tests {
         )
         .unwrap();
         let g = RubricFileGrader.grade(dir.path()).unwrap();
-        assert_eq!(g.n_passed, 2);
+        assert_eq!(g.n_passed, 3); // weights 2+1
+        assert_eq!(g.n_criteria, 3);
         assert!(g.all_pass);
 
         std::fs::write(dir.path().join("answer.txt"), "BASE: contracts/task-1\n").unwrap();
         let g = RubricFileGrader.grade(dir.path()).unwrap();
-        assert_eq!(g.n_passed, 1);
+        assert_eq!(g.n_passed, 1); // only mentions_task weight 1
         assert!(!g.all_pass);
     }
 
@@ -258,15 +341,26 @@ mod tests {
     fn load_jobbench_style_rubrics() {
         let jb = r#"{
           "rubrics": [
-            {"criterion": "OK:", "weight": 1.0},
+            {"criterion": "OK:", "weight": 2.0},
             {"criterion": ["contracts/task-1"], "weight": 1.0, "id": "task"}
           ]
         }"#;
         let r = load_rubric_json(jb).unwrap();
         assert_eq!(r.criteria.len(), 2);
         let g = r.grade_text("OK: contracts/task-1\n");
+        assert_eq!((g.n_passed, g.n_criteria), (3, 3));
         assert!(g.all_pass);
         let g = r.grade_text("BASE: contracts/task-1\n");
         assert_eq!(g.n_passed, 1);
+    }
+
+    #[test]
+    fn lab_criteria_stripped_from_improver_view() {
+        let raw = r#"{"id":"t","criteria":[{"id":"a","must_contain":"OK:","weight":2}]}"#;
+        let r = rubric_from_lab_task_json(raw).unwrap();
+        assert_eq!(r.criteria[0].weight, 2);
+        let stripped = strip_lab_task_for_improver(raw);
+        assert!(!stripped.contains("criteria"));
+        assert!(stripped.contains("\"id\""));
     }
 }

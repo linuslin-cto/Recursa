@@ -2,7 +2,9 @@
 
 use crate::benchmarks::{BenchmarkId, BenchmarkStub};
 use crate::datasets::{self, TaskIndex};
-use crate::grader::{Grader, Rubric, RubricFileGrader};
+use crate::grader::{
+    rubric_from_lab_task_json, strip_lab_task_for_improver, Grader, Rubric, RubricFileGrader,
+};
 use crate::proposer::{Proposer, ProposerError, Reply};
 use crate::spec::{BenchSpec, BenchmarkAdapter, SpecError};
 use crate::tree::{self, SurfaceSpec, Tree};
@@ -98,9 +100,14 @@ impl CatalogAdapter {
             let p = dir.join(name);
             if p.is_file() {
                 if name == "task.json" {
-                    return fs::read_to_string(&p).unwrap_or_else(|_| {
-                        format!("[{}] Produce the deliverable for {task_id}.", self.domain_of(task_id))
+                    let raw = fs::read_to_string(&p).unwrap_or_else(|_| {
+                        format!(
+                            "[{}] Produce the deliverable for {task_id}.",
+                            self.domain_of(task_id)
+                        )
                     });
+                    // LAB: never leak grading criteria into the improver prompt.
+                    return strip_lab_task_for_improver(&raw);
                 }
                 return fs::read_to_string(&p).unwrap_or_default();
             }
@@ -199,10 +206,19 @@ impl BenchmarkAdapter for CatalogAdapter {
             format!("[ACTION] catalog stub execute\n[OBSERVATION]\n{answer}"),
         )
         .map_err(|e| SpecError::Msg(e.to_string()))?;
-        // Attach rubrics for judge (task tree or generated stub).
-        let task_rubric = self.on_disk_task_dir(task_id).join("rubrics.json");
-        let rubric_body = if task_rubric.is_file() {
-            fs::read_to_string(&task_rubric).unwrap_or_default()
+        // Attach rubrics for judge: prefer task rubrics / LAB criteria, else stub.
+        let task_dir = self.on_disk_task_dir(task_id);
+        let rubric_body = if task_dir.join("rubrics.json").is_file() {
+            fs::read_to_string(task_dir.join("rubrics.json")).unwrap_or_default()
+        } else if task_dir.join("RUBRICS.json").is_file() {
+            fs::read_to_string(task_dir.join("RUBRICS.json")).unwrap_or_default()
+        } else if task_dir.join("task.json").is_file() {
+            let raw = fs::read_to_string(task_dir.join("task.json")).unwrap_or_default();
+            match rubric_from_lab_task_json(&raw) {
+                Ok(r) => serde_json::to_string_pretty(&r).unwrap_or_default(),
+                Err(_) => serde_json::to_string_pretty(&Rubric::catalog_stub(task_id))
+                    .unwrap_or_default(),
+            }
         } else {
             serde_json::to_string_pretty(&Rubric::catalog_stub(task_id)).unwrap_or_default()
         };

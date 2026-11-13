@@ -271,7 +271,7 @@ fn write_stub_rubric(dir: &Path, task_id: &str) -> Result<(), String> {
     // JobBench-shaped twin for loader parity tests / upstream tooling.
     let jb = serde_json::json!({
         "rubrics": [
-            {"id": "refined_ok_prefix", "criterion": "OK:", "weight": 1.0, "must_contain": "OK:"},
+            {"id": "refined_ok_prefix", "criterion": "OK:", "weight": 2.0, "must_contain": "OK:"},
             {"id": "mentions_task", "criterion": task_id, "weight": 1.0, "must_contain": task_id},
         ]
     });
@@ -304,8 +304,17 @@ pub fn materialise_stub_dataset(root: &Path, stub: &BenchmarkStub) -> Result<Tas
                 let task_name = id.split('/').nth(1).unwrap_or("task-1");
                 let dir = root.join(&domain).join(task_name);
                 fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-                let meta = serde_json::json!({"id": id, "domain": domain});
-                fs::write(dir.join("task.json"), meta.to_string() + "\n").map_err(|e| e.to_string())?;
+                // criteria stay on disk for the judge; improver views strip them.
+                let meta = serde_json::json!({
+                    "id": id,
+                    "domain": domain,
+                    "criteria": [
+                        {"id": "refined_ok_prefix", "must_contain": "OK:", "weight": 2},
+                        {"id": "mentions_task", "must_contain": id, "weight": 1}
+                    ]
+                });
+                fs::write(dir.join("task.json"), serde_json::to_string_pretty(&meta).unwrap() + "\n")
+                    .map_err(|e| e.to_string())?;
                 write_stub_rubric(&dir, &id)?;
             }
         }
