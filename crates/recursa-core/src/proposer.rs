@@ -5,6 +5,7 @@ use crate::spec::ChannelSpec;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,6 +75,11 @@ pub trait SessionTransport: Send + Sync {
         label: &str,
         model: &str,
     ) -> Result<TransportResult, ProposerError>;
+
+    /// Independent transport for parallel Propose (`Proposer::fork`).
+    fn fork(&self) -> Option<Box<dyn SessionTransport>> {
+        None
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -85,6 +91,7 @@ pub struct TransportResult {
 }
 
 /// Fixture transport: feed canned JSONL (tests / dry-run).
+#[derive(Clone)]
 pub struct FixtureTransport {
     pub stdout: String,
     pub answer_file: Option<String>,
@@ -92,6 +99,10 @@ pub struct FixtureTransport {
 }
 
 impl SessionTransport for FixtureTransport {
+    fn fork(&self) -> Option<Box<dyn SessionTransport>> {
+        Some(Box::new(self.clone()))
+    }
+
     fn run_session(
         &mut self,
         _mission: &str,
@@ -118,12 +129,17 @@ impl SessionTransport for FixtureTransport {
 }
 
 /// Spawn an external command that prints OpenCode JSONL on stdout.
+#[derive(Clone)]
 pub struct CommandTransport {
     pub program: PathBuf,
     pub args: Vec<String>,
 }
 
 impl SessionTransport for CommandTransport {
+    fn fork(&self) -> Option<Box<dyn SessionTransport>> {
+        Some(Box::new(self.clone()))
+    }
+
     fn run_session(
         &mut self,
         mission: &str,
@@ -178,7 +194,7 @@ fn fs_read_optional(path: &Path) -> Option<String> {
 pub struct ChannelProposer {
     pub spec: ChannelSpec,
     transport: Box<dyn SessionTransport>,
-    pub calls: Vec<Reply>,
+    pub calls: Arc<Mutex<Vec<Reply>>>,
 }
 
 impl ChannelProposer {
@@ -208,12 +224,25 @@ impl ChannelProposer {
         Ok(Self {
             spec,
             transport,
-            calls: Vec::new(),
+            calls: Arc::new(Mutex::new(Vec::new())),
         })
+    }
+
+    pub fn call_count(&self) -> usize {
+        self.calls.lock().unwrap().len()
     }
 }
 
 impl Proposer for ChannelProposer {
+    fn fork(&self) -> Option<Box<dyn Proposer>> {
+        let transport = self.transport.fork()?;
+        Some(Box::new(ChannelProposer {
+            spec: self.spec.clone(),
+            transport,
+            calls: Arc::clone(&self.calls),
+        }))
+    }
+
     fn call(
         &mut self,
         mission: &str,
@@ -235,7 +264,7 @@ impl Proposer for ChannelProposer {
                     cached: false,
                     workspace: tr.workspace,
                 };
-                self.calls.push(reply.clone());
+                self.calls.lock().unwrap().push(reply.clone());
                 Ok(reply)
             }
             Err(mut err) => {
@@ -252,7 +281,7 @@ impl Proposer for ChannelProposer {
                     cached: false,
                     workspace: None,
                 };
-                self.calls.push(failed);
+                self.calls.lock().unwrap().push(failed);
                 Err(err)
             }
         }
@@ -283,7 +312,7 @@ mod tests {
         let err = prop.call("mission", None, "fixture").unwrap_err();
         assert!(err.message.contains("provider unavailable"));
         assert!((err.cost_usd - 0.25).abs() < 1e-9);
-        assert!(!prop.calls.last().unwrap().ok);
+        assert!(!prop.calls.lock().unwrap().last().unwrap().ok);
     }
 
     #[test]
@@ -304,5 +333,27 @@ mod tests {
         let reply = prop.call("mission", None, "ok").unwrap();
         assert_eq!(reply.text, "final answer");
         assert!((reply.cost_usd - 0.1).abs() < 1e-9);
+    }
+
+    #[test]
+    fn channel_proposer_forks_for_parallel_stages() {
+        let stdout = r#"{"type":"text","part":{"text":"ok"}}
+{"type":"step_finish","part":{"cost":0.0}}
+"#;
+        let spec = ChannelSpec::new("opencode", "local/fixture").unwrap();
+        let prop = ChannelProposer::with_transport(
+            spec,
+            Box::new(FixtureTransport {
+                stdout: stdout.into(),
+                answer_file: Some("ok".into()),
+                fail: false,
+            }),
+        )
+        .unwrap();
+        let mut a = prop.fork().expect("fixture transport forks");
+        let mut b = prop.fork().expect("fixture transport forks");
+        a.call("m", None, "a").unwrap();
+        b.call("m", None, "b").unwrap();
+        assert_eq!(prop.call_count(), 2);
     }
 }

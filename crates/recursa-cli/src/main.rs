@@ -65,6 +65,17 @@ enum Commands {
         #[arg(long)]
         seed: Option<u64>,
     },
+    /// Judge + report a catalog run (adapter.score; base vs refined).
+    Judge {
+        #[arg(long)]
+        bench: String,
+        #[arg(long, default_value = "datasets")]
+        dataset: PathBuf,
+        #[arg(long, default_value = "runs/catalog")]
+        output: PathBuf,
+        #[arg(long, default_value_t = 1)]
+        k: usize,
+    },
 }
 
 fn grade_demo_selection(task_id: &str, run_dir: &Path) -> Result<JudgeRow, String> {
@@ -83,6 +94,131 @@ fn grade_demo_selection(task_id: &str, run_dir: &Path) -> Result<JudgeRow, Strin
         n_criteria: Some(g.n_criteria),
         error: String::new(),
     })
+}
+
+fn stub_for_bench(bench: &str) -> Result<recursa_core::benchmarks::BenchmarkStub> {
+    let id = recursa_core::benchmarks::BenchmarkId::from_token(bench)
+        .ok_or_else(|| anyhow::anyhow!("unknown bench {bench}; expected jb|lab|wb"))?;
+    Ok(match id {
+        recursa_core::benchmarks::BenchmarkId::JobBench => {
+            recursa_core::benchmarks::BenchmarkStub::jobbench()
+        }
+        recursa_core::benchmarks::BenchmarkId::Lab => {
+            recursa_core::benchmarks::BenchmarkStub::lab()
+        }
+        recursa_core::benchmarks::BenchmarkId::WorkBuddy => {
+            recursa_core::benchmarks::BenchmarkStub::workbuddy()
+        }
+        recursa_core::benchmarks::BenchmarkId::Demo => {
+            bail!("demo uses recursa demo/score, not judge")
+        }
+    })
+}
+
+fn score_catalog(output: &Path, dataset: &Path, bench: &str, k: usize) -> Result<()> {
+    let stub = stub_for_bench(bench)?;
+    let data_root = recursa_core::datasets::dataset_root(dataset, stub.id.as_str());
+    let adapter = recursa_core::catalog::CatalogAdapter::open(output, &data_root, stub)
+        .map_err(|e| anyhow::anyhow!(e))?;
+    let ns_dir = adapter
+        .spec
+        .runs_root
+        .join(format!("{}-oc-agg{k}", adapter.spec.name));
+    if !ns_dir.is_dir() {
+        bail!(
+            "missing catalog runs at {}; run `recursa run --bench {bench}` first",
+            ns_dir.display()
+        );
+    }
+    let sels = judge::collect_selections(&ns_dir, &["agg", "seq"]);
+    let rows = judge::judge_selections(&adapter, &sels);
+    let mut refined = Vec::new();
+    for (sel, row) in sels.iter().zip(rows.iter()) {
+        let label = sel
+            .get("chosen_label")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let chosen_is_base = sel
+            .get("chosen_is_base")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        refined.push(Scored::from_judge_row(row, label, chosen_is_base));
+    }
+
+    let mut base_rows = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&ns_dir) {
+        for entry in entries.flatten() {
+            let task_slug = entry.file_name().to_string_lossy().into_owned();
+            if task_slug.ends_with(".json") || !entry.path().is_dir() {
+                continue;
+            }
+            let task_id = task_slug.replace("__", "/");
+            let run_id = format!("{}-oc-agg{k}/{task_id}/base1", adapter.spec.name);
+            let run_dir = output.join("executions").join(&run_id);
+            for mode in ["agg", "seq"] {
+                match adapter.score(&run_dir) {
+                    Some(score) => base_rows.push(Scored {
+                        task_id: task_id.clone(),
+                        mode: mode.into(),
+                        k,
+                        label: "base1".into(),
+                        run_id: run_id.clone(),
+                        chosen_is_base: true,
+                        graded: true,
+                        n_passed: score.get("n_passed").and_then(|v| v.as_u64()),
+                        n_criteria: score.get("n_criteria").and_then(|v| v.as_u64()),
+                        all_pass: score
+                            .get("all_pass")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
+                        error: String::new(),
+                    }),
+                    None => base_rows.push(Scored {
+                        task_id: task_id.clone(),
+                        mode: mode.into(),
+                        k,
+                        label: "base1".into(),
+                        run_id: run_id.clone(),
+                        chosen_is_base: true,
+                        graded: false,
+                        n_passed: None,
+                        n_criteria: None,
+                        all_pass: false,
+                        error: "adapter returned no score".into(),
+                    }),
+                }
+            }
+        }
+    }
+
+    let empty_fb = BTreeMap::new();
+    let empty_usd = BTreeMap::new();
+    let refined_sum = report::summarise(&refined, &empty_fb, &empty_usd);
+    let base_sum = report::summarise(&base_rows, &empty_fb, &empty_usd);
+    let gain = report::gains(&base_sum, &refined_sum);
+    println!(
+        "{}",
+        report::render(
+            &refined_sum,
+            &format!("Recursa {}-oc refined k={k}", adapter.spec.name),
+            &adapter.spec.name
+        )
+    );
+    println!();
+    println!("{}", report::render_gains(&gain));
+    let judged_path = ns_dir.join("judged.json");
+    std::fs::write(
+        &judged_path,
+        serde_json::to_string_pretty(&json!({
+            "refined": refined,
+            "base": base_rows,
+            "summaries": refined_sum,
+            "base_summaries": base_sum,
+            "gains": gain,
+        }))?,
+    )?;
+    eprintln!("wrote {}", judged_path.display());
+    Ok(())
 }
 
 fn score_demo(output: &Path, k: usize) -> Result<()> {
@@ -340,22 +476,7 @@ fn main() -> Result<()> {
             if k == 0 {
                 bail!("--k must be >= 1");
             }
-            let id = recursa_core::benchmarks::BenchmarkId::from_token(&bench)
-                .ok_or_else(|| anyhow::anyhow!("unknown bench {bench}; expected jb|lab|wb"))?;
-            let stub = match id {
-                recursa_core::benchmarks::BenchmarkId::JobBench => {
-                    recursa_core::benchmarks::BenchmarkStub::jobbench()
-                }
-                recursa_core::benchmarks::BenchmarkId::Lab => {
-                    recursa_core::benchmarks::BenchmarkStub::lab()
-                }
-                recursa_core::benchmarks::BenchmarkId::WorkBuddy => {
-                    recursa_core::benchmarks::BenchmarkStub::workbuddy()
-                }
-                recursa_core::benchmarks::BenchmarkId::Demo => {
-                    bail!("demo uses recursa demo, not run")
-                }
-            };
+            let stub = stub_for_bench(&bench)?;
             let data_root = recursa_core::datasets::dataset_root(&dataset, stub.id.as_str());
             std::fs::create_dir_all(&output)?;
             let adapter = recursa_core::catalog::CatalogAdapter::open(&output, &data_root, stub)
@@ -405,6 +526,17 @@ fn main() -> Result<()> {
                     .execution_count
                     .load(std::sync::atomic::Ordering::SeqCst)
             );
+        }
+        Commands::Judge {
+            bench,
+            dataset,
+            output,
+            k,
+        } => {
+            if k == 0 {
+                bail!("--k must be >= 1");
+            }
+            score_catalog(&output, &dataset, &bench, k)?;
         }
     }
     Ok(())
