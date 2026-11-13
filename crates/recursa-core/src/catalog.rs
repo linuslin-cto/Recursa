@@ -117,6 +117,41 @@ impl CatalogAdapter {
             self.domain_of(task_id)
         )
     }
+
+    /// Resolve rubric JSON for a task (dataset file → LAB criteria → stub).
+    pub fn rubric_body_for_task(&self, task_id: &str) -> String {
+        let task_dir = self.on_disk_task_dir(task_id);
+        if task_dir.join("rubrics.json").is_file() {
+            return fs::read_to_string(task_dir.join("rubrics.json")).unwrap_or_default();
+        }
+        if task_dir.join("RUBRICS.json").is_file() {
+            return fs::read_to_string(task_dir.join("RUBRICS.json")).unwrap_or_default();
+        }
+        if task_dir.join("task.json").is_file() {
+            let raw = fs::read_to_string(task_dir.join("task.json")).unwrap_or_default();
+            return match rubric_from_lab_task_json(&raw) {
+                Ok(r) => serde_json::to_string_pretty(&r).unwrap_or_default(),
+                Err(_) => serde_json::to_string_pretty(&Rubric::catalog_stub(task_id))
+                    .unwrap_or_default(),
+            };
+        }
+        serde_json::to_string_pretty(&Rubric::catalog_stub(task_id)).unwrap_or_default()
+    }
+
+    pub fn attach_rubrics(&self, run_dir: &Path, task_id: &str) -> Result<(), SpecError> {
+        fs::write(run_dir.join("rubrics.json"), self.rubric_body_for_task(task_id))
+            .map_err(|e| SpecError::Msg(e.to_string()))
+    }
+
+    /// Infer `domain/task` from `.../executions/<ns>/<domain>/<task>/<label>`.
+    fn infer_task_id_from_run_dir(run_dir: &Path) -> Option<String> {
+        let task = run_dir.parent()?.file_name()?.to_str()?;
+        let domain = run_dir.parent()?.parent()?.file_name()?.to_str()?;
+        if domain.is_empty() || task.is_empty() || domain.contains("-oc-") {
+            return None;
+        }
+        Some(format!("{domain}/{task}"))
+    }
 }
 
 impl BenchmarkAdapter for CatalogAdapter {
@@ -206,24 +241,7 @@ impl BenchmarkAdapter for CatalogAdapter {
             format!("[ACTION] catalog stub execute\n[OBSERVATION]\n{answer}"),
         )
         .map_err(|e| SpecError::Msg(e.to_string()))?;
-        // Attach rubrics for judge: prefer task rubrics / LAB criteria, else stub.
-        let task_dir = self.on_disk_task_dir(task_id);
-        let rubric_body = if task_dir.join("rubrics.json").is_file() {
-            fs::read_to_string(task_dir.join("rubrics.json")).unwrap_or_default()
-        } else if task_dir.join("RUBRICS.json").is_file() {
-            fs::read_to_string(task_dir.join("RUBRICS.json")).unwrap_or_default()
-        } else if task_dir.join("task.json").is_file() {
-            let raw = fs::read_to_string(task_dir.join("task.json")).unwrap_or_default();
-            match rubric_from_lab_task_json(&raw) {
-                Ok(r) => serde_json::to_string_pretty(&r).unwrap_or_default(),
-                Err(_) => serde_json::to_string_pretty(&Rubric::catalog_stub(task_id))
-                    .unwrap_or_default(),
-            }
-        } else {
-            serde_json::to_string_pretty(&Rubric::catalog_stub(task_id)).unwrap_or_default()
-        };
-        fs::write(run_dir.join("rubrics.json"), rubric_body)
-            .map_err(|e| SpecError::Msg(e.to_string()))?;
+        self.attach_rubrics(&run_dir, task_id)?;
         Ok(run_dir)
     }
 
@@ -246,6 +264,12 @@ impl BenchmarkAdapter for CatalogAdapter {
     }
 
     fn score(&self, run_dir: &Path) -> Option<HashMap<String, serde_json::Value>> {
+        // Older/partial runs may lack rubrics.json; attach from dataset when possible.
+        if !run_dir.join("rubrics.json").is_file() && !run_dir.join("RUBRICS.json").is_file() {
+            if let Some(task_id) = Self::infer_task_id_from_run_dir(run_dir) {
+                let _ = self.attach_rubrics(run_dir, &task_id);
+            }
+        }
         let g = grade_run_dir(run_dir).ok()?;
         let mut m = HashMap::new();
         m.insert("n_passed".into(), serde_json::json!(g.n_passed));
@@ -377,5 +401,19 @@ mod tests {
             adapter.deliverable_text(&chosen).starts_with("OK:"),
             "refined catalog deliverable expected"
         );
+        assert!(
+            chosen.join("rubrics.json").is_file(),
+            "execute must attach rubrics"
+        );
+        let refined = adapter.score(&chosen).expect("refined score");
+        assert_eq!(refined.get("all_pass"), Some(&serde_json::json!(true)));
+
+        let base_dir = chosen.parent().unwrap().join("base1");
+        assert!(base_dir.is_dir(), "base1 run dir expected beside chosen");
+        // Simulate a stale run missing rubrics.json — score should recover.
+        let _ = fs::remove_file(base_dir.join("rubrics.json"));
+        let base = adapter.score(&base_dir).expect("base score after attach");
+        assert_eq!(base.get("all_pass"), Some(&serde_json::json!(false)));
+        assert!(base_dir.join("rubrics.json").is_file());
     }
 }
