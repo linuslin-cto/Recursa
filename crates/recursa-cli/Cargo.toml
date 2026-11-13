@@ -1,0 +1,18 @@
+[package]
+name = "recursa-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Recursa CLI"
+default-run = "recursa"
+
+[[bin]]
+name = "recursa"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+recursa-core.workspace = true
+recursa-demo.workspace = true
+serde_json.workspace = true
