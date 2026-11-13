@@ -2,6 +2,7 @@
 
 use crate::benchmarks::{BenchmarkId, BenchmarkStub};
 use crate::datasets::{self, TaskIndex};
+use crate::grader::{Grader, Rubric, RubricFileGrader};
 use crate::proposer::{Proposer, ProposerError, Reply};
 use crate::spec::{BenchSpec, BenchmarkAdapter, SpecError};
 use crate::tree::{self, SurfaceSpec, Tree};
@@ -198,6 +199,15 @@ impl BenchmarkAdapter for CatalogAdapter {
             format!("[ACTION] catalog stub execute\n[OBSERVATION]\n{answer}"),
         )
         .map_err(|e| SpecError::Msg(e.to_string()))?;
+        // Attach rubrics for judge (task tree or generated stub).
+        let task_rubric = self.on_disk_task_dir(task_id).join("rubrics.json");
+        let rubric_body = if task_rubric.is_file() {
+            fs::read_to_string(&task_rubric).unwrap_or_default()
+        } else {
+            serde_json::to_string_pretty(&Rubric::catalog_stub(task_id)).unwrap_or_default()
+        };
+        fs::write(run_dir.join("rubrics.json"), rubric_body)
+            .map_err(|e| SpecError::Msg(e.to_string()))?;
         Ok(run_dir)
     }
 
@@ -220,13 +230,15 @@ impl BenchmarkAdapter for CatalogAdapter {
     }
 
     fn score(&self, run_dir: &Path) -> Option<HashMap<String, serde_json::Value>> {
-        let text = fs::read_to_string(run_dir.join("answer.txt")).ok()?;
-        let pass = text.starts_with("OK:");
+        let g = RubricFileGrader.grade(run_dir).ok()?;
         let mut m = HashMap::new();
-        m.insert("n_passed".into(), serde_json::json!(u64::from(pass)));
-        m.insert("n_criteria".into(), serde_json::json!(1));
-        m.insert("all_pass".into(), serde_json::json!(pass));
-        m.insert("metric".into(), serde_json::json!("catalog_ok_prefix"));
+        m.insert("n_passed".into(), serde_json::json!(g.n_passed));
+        m.insert("n_criteria".into(), serde_json::json!(g.n_criteria));
+        m.insert("all_pass".into(), serde_json::json!(g.all_pass));
+        m.insert("metric".into(), serde_json::json!("rubric"));
+        for (k, v) in g.detail {
+            m.insert(k, v);
+        }
         Some(m)
     }
 }

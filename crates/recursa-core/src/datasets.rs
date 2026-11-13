@@ -9,6 +9,7 @@
 //! Stub materialisation writes the same shapes so offline tests need no HF checkout.
 
 use crate::benchmarks::{BenchmarkId, BenchmarkStub};
+use crate::grader::Rubric;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
@@ -260,6 +261,15 @@ pub fn select_split(
     }
 }
 
+fn write_stub_rubric(dir: &Path, task_id: &str) -> Result<(), String> {
+    let rubric = Rubric::catalog_stub(task_id);
+    fs::write(
+        dir.join("rubrics.json"),
+        serde_json::to_string_pretty(&rubric).unwrap() + "\n",
+    )
+    .map_err(|e| e.to_string())
+}
+
 /// Write native-layout fixtures for a stub and an INDEX.json.
 pub fn materialise_stub_dataset(root: &Path, stub: &BenchmarkStub) -> Result<TaskIndex, String> {
     fs::create_dir_all(root).map_err(|e| e.to_string())?;
@@ -274,6 +284,7 @@ pub fn materialise_stub_dataset(root: &Path, stub: &BenchmarkStub) -> Result<Tas
                     format!("[{domain}] Produce the deliverable for {id}.\n"),
                 )
                 .map_err(|e| e.to_string())?;
+                write_stub_rubric(&dir, &id)?;
             }
         }
         BenchmarkId::Lab => {
@@ -283,6 +294,7 @@ pub fn materialise_stub_dataset(root: &Path, stub: &BenchmarkStub) -> Result<Tas
                 fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
                 let meta = serde_json::json!({"id": id, "domain": domain});
                 fs::write(dir.join("task.json"), meta.to_string() + "\n").map_err(|e| e.to_string())?;
+                write_stub_rubric(&dir, &id)?;
             }
         }
         BenchmarkId::WorkBuddy => {
@@ -303,6 +315,7 @@ pub fn materialise_stub_dataset(root: &Path, stub: &BenchmarkStub) -> Result<Tas
                     format!("[{domain}] Produce the deliverable for {id}.\n"),
                 )
                 .map_err(|e| e.to_string())?;
+                write_stub_rubric(&dir, &id)?;
             }
         }
         BenchmarkId::Demo => return Err("demo has no dataset catalog".into()),

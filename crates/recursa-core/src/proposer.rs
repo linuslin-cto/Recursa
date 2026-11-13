@@ -190,6 +190,20 @@ fn fs_read_optional(path: &Path) -> Option<String> {
     std::fs::read_to_string(path).ok().filter(|s| !s.trim().is_empty())
 }
 
+/// Build a `CommandTransport` aimed at `scripts/opencode-session.ps1` (fork-safe).
+pub fn opencode_shim_transport(repo_root: &Path) -> CommandTransport {
+    let script = repo_root.join("scripts").join("opencode-session.ps1");
+    let shell = if cfg!(windows) {
+        PathBuf::from("pwsh")
+    } else {
+        PathBuf::from("pwsh")
+    };
+    CommandTransport {
+        program: shell,
+        args: vec!["-NoProfile".into(), "-File".into(), script.display().to_string()],
+    }
+}
+
 /// Channel-backed proposer: transport → OpenCode JSONL parser → Reply.
 pub struct ChannelProposer {
     pub spec: ChannelSpec,

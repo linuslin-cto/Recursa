@@ -45,5 +45,12 @@ $env:RECURSA_IMPROVER_MODEL = "provider/model-id"
 # CommandTransport { program: pwsh, args: ["-File", "scripts/opencode-session.ps1"] }
 ```
 
-`scripts/opencode-session.ps1` emits dry-run JSONL when `OPENCODE_DIR` is unset.
-Live spawn is optional; the demo path uses `DemoProposer` and needs no credentials.
+`scripts/opencode-session.ps1` emits dry-run JSONL when `OPENCODE_DIR` is unset
+(or `RECURSA_FORCE_FIXTURE=1`). Live spawn uses a process timeout
+(`RECURSA_SESSION_TIMEOUT_SEC`, default 600) and writes a per-label
+`.recursa_session_<label>.lock` under `--context` so parallel `Proposer::fork`
+stages do not collide.
+
+Helper: `recursa_core::proposer::opencode_shim_transport(repo_root)`.
+
+The demo path uses `DemoProposer` and needs no credentials.
