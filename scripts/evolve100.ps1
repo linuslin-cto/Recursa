@@ -1,5 +1,9 @@
-﻿# Force 100 rounds of Recursa self-evolution evaluation (DeepSeek key from .env).
-# Round = self_evolution test + recursa score --k 1 (must show Δ +100 pp).
+﻿# 100-round Recursa self-evolution eval (harness2-aligned protocol).
+# Per round:
+#   1) task+harnessing: cargo test self_evolution
+#   2) catalog harnessing+score: cargo test catalog_self_evolution
+#   3) demo score report: recursa score --k 1 (require Δ ≥ 99.99 pp)
+# DeepSeek key from .env; ping once at start and every 10 rounds.
 # Emits: AGENT_LOOP_TICK_evolve100 {...}
 
 $ErrorActionPreference = "Continue"
@@ -34,6 +38,7 @@ function Write-ProgressJson($round, $passed, $failed, $lastOk, $dsOk, $deltaPp) 
         delta_pp    = $deltaPp
         deepseek_ok = $dsOk
         updated_at  = (Get-Date).ToString("o")
+        protocol    = "harness2-aligned: self_evolution+catalog_self_evolution+demo_score"
     }
     ($obj | ConvertTo-Json -Compress) | Set-Content -Path $progressPath -Encoding UTF8
 }
@@ -42,15 +47,14 @@ function Test-DeepSeek {
     if (-not $env:DEEPSEEK_API_KEY) { return $false }
     $base = if ($env:DEEPSEEK_BASE_URL) { $env:DEEPSEEK_BASE_URL.TrimEnd('/') } else { "https://api.deepseek.com" }
     $model = if ($env:DEEPSEEK_MODEL) { $env:DEEPSEEK_MODEL } else { "deepseek-chat" }
-    $body = @{
-        model      = $model
-        messages   = @(@{ role = "user"; content = "ping" })
-        max_tokens = 8
-    } | ConvertTo-Json -Depth 5
+    # Raw JSON — ConvertTo-Json on nested hashtables can break the API payload.
+    $body = "{`"model`":`"$model`",`"messages`":[{`"role`":`"user`",`"content`":`"ping`"}],`"max_tokens`":8}"
     try {
         $resp = Invoke-RestMethod -Method Post -Uri "$base/v1/chat/completions" `
-            -Headers @{ Authorization = "Bearer $($env:DEEPSEEK_API_KEY)" } `
-            -ContentType "application/json" `
+            -Headers @{
+                Authorization  = "Bearer $($env:DEEPSEEK_API_KEY)"
+                "Content-Type" = "application/json"
+            } `
             -Body $body `
             -TimeoutSec 60
         return [bool]$resp.choices
@@ -60,7 +64,6 @@ function Test-DeepSeek {
 }
 
 function Get-ScoreDelta([string]$scoreLog) {
-    # Prefer parallel line; require +100 pp for offline demo identity
     $m = [regex]::Match($scoreLog, 'parallel k=1:.*?Δ \+([0-9.]+) pp')
     if ($m.Success) { return [double]$m.Groups[1].Value }
     $m2 = [regex]::Match($scoreLog, 'Δ \+([0-9.]+) pp')
@@ -70,7 +73,7 @@ function Get-ScoreDelta([string]$scoreLog) {
 
 Write-Host "evolve100: verifying DeepSeek key (once)..."
 $dsOk = Test-DeepSeek
-Write-Host "evolve100: deepseek_ok=$dsOk"
+Write-Host "evolve100: deepseek_ok=$dsOk protocol=harness2-aligned"
 
 $passed = 0
 $failed = 0
@@ -81,11 +84,15 @@ for ($i = 1; $i -le 100; $i++) {
     New-Item -ItemType Directory -Force -Path $roundDemo | Out-Null
 
     $okTest = $false
+    $okCatalog = $false
     $okScore = $false
     $deltaPp = $null
 
     & cargo test -p recursa-core --test self_evolution -q *> $roundLog
     $okTest = ($LASTEXITCODE -eq 0)
+
+    & cargo test -p recursa-core --test catalog_self_evolution -q *>> $roundLog
+    $okCatalog = ($LASTEXITCODE -eq 0)
 
     $scoreOut = & cargo run -p recursa-cli -- score --output $roundDemo --k 1 2>&1 | Out-String
     Add-Content -Path $roundLog -Value $scoreOut -Encoding UTF8
@@ -93,7 +100,7 @@ for ($i = 1; $i -le 100; $i++) {
     $deltaPp = Get-ScoreDelta $scoreOut
     $okGain = ($null -ne $deltaPp -and $deltaPp -ge 99.99)
 
-    $ok = $okTest -and $okScore -and $okGain
+    $ok = $okTest -and $okCatalog -and $okScore -and $okGain
     $sw.Stop()
     if ($ok) { $passed++ } else { $failed++ }
 
@@ -106,6 +113,7 @@ for ($i = 1; $i -le 100; $i++) {
         total       = 100
         ok          = $ok
         ok_test     = $okTest
+        ok_catalog  = $okCatalog
         ok_score    = $okScore
         ok_gain     = $okGain
         delta_pp    = $deltaPp
