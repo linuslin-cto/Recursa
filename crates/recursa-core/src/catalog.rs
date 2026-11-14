@@ -342,7 +342,14 @@ impl Proposer for CatalogProposer {
             }
             text = format!("<why>Prefer refined catalog output.</why>\n```choice\n{pick}\n```");
         } else if label.starts_with("experience.") {
-            text = "NO_ENTRY".into();
+            // Emit a minimal valid experience so Library::add can store the
+            // adopted harness (harnessing-level self-evolution on catalog stubs).
+            text = format!(
+                "<experience>\ncue: Catalog stub refined deliverable for this task\n\
+                 lesson: Prefer harness edits that produce the OK: prefix\n\
+                 evidence: Refined answer starts with OK: and names the task id\n\
+                 confidence: high for offline catalog dry-run\n</experience>"
+            );
         } else {
             let ws = context.join("harness");
             let prompt_path = ws.join("systemprompt.md");

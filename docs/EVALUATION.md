@@ -50,8 +50,16 @@ Expected offline result on the ledger demo:
 (`self_evolution` asserts the same numbers.)
 
 Catalog stubs use **weighted** rubrics (e.g. OK: weight 2, task-id weight 1).
-Optional: set `RECURSA_EXTERNAL_JUDGE` to a program that writes `scores.json`
-into the run directory (see `ExternalJudgeGrader`).
+JobBench fixtures include two accounting tasks so harnessing-level library
+carry-over (`accounting/task-1` → `task-2`) is covered by
+`catalog_self_evolution`. Optional: set `RECURSA_EXTERNAL_JUDGE` to a program
+that writes `scores.json` into the run directory (see `ExternalJudgeGrader`).
+
+```powershell
+cargo test -p recursa-core --test catalog_self_evolution
+cargo run -p recursa-cli -- run --bench jb --dataset datasets --output runs/jb --k 1
+cargo run -p recursa-cli -- judge --bench jb --dataset datasets --output runs/jb --k 1
+```
 
 ## Paper reference gains (model-backed benches)
 

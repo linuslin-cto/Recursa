@@ -397,10 +397,14 @@ mod tests {
     fn materialise_jb_and_wb() {
         let dir = tempfile::tempdir().unwrap();
         let jb = materialise_stub_dataset(&dir.path().join("jb"), &BenchmarkStub::jobbench()).unwrap();
-        assert_eq!(jb.tasks.len(), 3);
+        assert_eq!(jb.tasks.len(), 4); // accounting×2 + hr + operations
         assert!(dir
             .path()
             .join("jb/accounting/task-1/task_folder/TASK_INSTRUCTIONS.txt")
+            .is_file());
+        assert!(dir
+            .path()
+            .join("jb/accounting/task-2/task_folder/TASK_INSTRUCTIONS.txt")
             .is_file());
 
         let wb_root = dir.path().join("wb");

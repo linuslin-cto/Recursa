@@ -123,12 +123,24 @@ impl BenchmarkStub {
         }
     }
 
-    /// One fixture task id per domain for dry-run catalogs.
+    /// Fixture task ids for dry-run catalogs.
+    ///
+    /// JobBench includes two accounting tasks so harnessing-level library
+    /// carry-over (task-1 → task-2) can be verified offline.
     pub fn fixture_tasks(&self) -> Vec<(String, String)> {
-        self.domains
-            .iter()
-            .map(|d| (format!("{d}/task-1"), d.clone()))
-            .collect()
+        match self.id {
+            BenchmarkId::JobBench => vec![
+                ("accounting/task-1".into(), "accounting".into()),
+                ("accounting/task-2".into(), "accounting".into()),
+                ("hr/task-1".into(), "hr".into()),
+                ("operations/task-1".into(), "operations".into()),
+            ],
+            _ => self
+                .domains
+                .iter()
+                .map(|d| (format!("{d}/task-1"), d.clone()))
+                .collect(),
+        }
     }
 }
 
