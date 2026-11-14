@@ -1,6 +1,10 @@
 /target/
 /datasets/
 /runs/
+# Local secrets — never commit
+.env
+.env.*
+!.env.example
 # Local upstream checkout (not part of this repo)
 /harness2/
 **/*.rs.bk
